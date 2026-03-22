@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Mic, MicOff, Loader2, Code2, AlertTriangle, Activity } from 'lucide-react';
+import { Mic, MicOff, Loader2, Code2, AlertTriangle, Activity, X, Maximize2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -10,6 +11,9 @@ export default function CommandCenterView() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Mini Window State
+  const [miniWindow, setMiniWindow] = useState<{isOpen: boolean, url: string, title: string}>({isOpen: false, url: '', title: ''});
 
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef('');
@@ -84,22 +88,37 @@ export default function CommandCenterView() {
       const prompt = `
 You are the AI Brain for an Android Automation Controller. Parse the user's natural language command into a strict JSON format representing the intent and required actions.
 
+If the user asks to open a website, app, or search for something (like YouTube, Google, Wikipedia), provide a "ui_action" to open it in a mini window.
+CRITICAL: For YouTube, ALWAYS use the embed URL format: "https://www.youtube.com/embed?listType=search&list=SEARCH_QUERY".
+For Google search, use "https://www.bing.com/search?q=SEARCH_QUERY" (Bing allows iframes, Google blocks them).
+For Wikipedia, use "https://en.wikipedia.org/wiki/SEARCH_QUERY".
+
 Output JSON format:
 {
   "intent": "string",
   "action_steps": ["string"],
   "required_permissions": ["string"],
   "external_api_calls": ["string"],
-  "confirmation_required": boolean
+  "confirmation_required": boolean,
+  "ui_action": {
+    "type": "open_mini_window",
+    "url": "string",
+    "title": "string"
+  } // Include this ONLY if opening a mini window is appropriate
 }
 
-Example: 'Good night routine' -> 
+Example: 'Open YouTube and play lo-fi hip hop' -> 
 {
-  "intent": "night_routine", 
-  "action_steps": ["turn_on_silent_mode", "set_alarm_6am", "turn_off_wifi", "open_meditation_app"], 
-  "required_permissions": ["DND", "ALARM", "WIFI"], 
+  "intent": "play_music", 
+  "action_steps": ["open_youtube_mini_window"], 
+  "required_permissions": ["INTERNET"], 
   "external_api_calls": [], 
-  "confirmation_required": false
+  "confirmation_required": false,
+  "ui_action": {
+    "type": "open_mini_window",
+    "url": "https://www.youtube.com/embed?listType=search&list=lo-fi+hip+hop",
+    "title": "YouTube: lo-fi hip hop"
+  }
 }
 
 Parse this command: "${textToParse}"
@@ -116,6 +135,15 @@ Parse this command: "${textToParse}"
       if (response.text) {
         const parsed = JSON.parse(response.text);
         setResult(parsed);
+        
+        // Trigger Mini Window if requested by AI
+        if (parsed.ui_action && parsed.ui_action.type === 'open_mini_window' && parsed.ui_action.url) {
+          setMiniWindow({
+            isOpen: true,
+            url: parsed.ui_action.url,
+            title: parsed.ui_action.title || 'Mini Window'
+          });
+        }
       } else {
         throw new Error("No response from AI");
       }
@@ -128,7 +156,7 @@ Parse this command: "${textToParse}"
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Voice Command Center</h1>
         <p className="text-slate-500">Speak naturally to trigger AI-powered automations.</p>
@@ -168,7 +196,7 @@ Parse this command: "${textToParse}"
                 Speak your command now...
               </p>
             ) : (
-              <p>Say something like "Turn off wifi and set an alarm for 7 AM"</p>
+              <p>Say something like "Open YouTube and play lo-fi music"</p>
             )}
           </div>
         </div>
@@ -229,6 +257,60 @@ Parse this command: "${textToParse}"
           </div>
         </div>
       )}
+
+      {/* Mini Window Modal */}
+      <AnimatePresence>
+        {miniWindow.isOpen && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm"
+          >
+            <div className="bg-white w-full max-w-4xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+              {/* Window Header */}
+              <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shadow-sm z-10">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-rose-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                  </div>
+                  <span className="font-medium text-sm ml-2 truncate max-w-[200px] sm:max-w-md">
+                    {miniWindow.title}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => window.open(miniWindow.url, '_blank')}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                    title="Open in new tab"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setMiniWindow({ isOpen: false, url: '', title: '' })}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-rose-500 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              
+              {/* Window Content (Iframe) */}
+              <div className="flex-1 bg-slate-50 relative">
+                <iframe 
+                  src={miniWindow.url} 
+                  className="absolute inset-0 w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
