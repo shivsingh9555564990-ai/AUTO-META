@@ -1,0 +1,5 @@
+{
+  "name": "AutoDroid Admin Panel",
+  "description": "Admin panel and AI command parser for the AI-Powered Android Automation Controller.",
+  "requestFramePermissions": []
+}
