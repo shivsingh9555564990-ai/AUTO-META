@@ -1,21 +1,84 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Send, Loader2, Code2, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Mic, MicOff, Loader2, Code2, AlertTriangle, Activity } from 'lucide-react';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default function CommandCenterView() {
-  const [command, setCommand] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleParseCommand = async () => {
-    if (!command.trim()) return;
+  const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef('');
+
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = true;
+
+      recognitionRef.current.onstart = () => {
+        setIsListening(true);
+        setTranscript('');
+        transcriptRef.current = '';
+        setError(null);
+        setResult(null);
+      };
+
+      recognitionRef.current.onresult = (event: any) => {
+        let currentTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          currentTranscript += event.results[i][0].transcript;
+        }
+        transcriptRef.current = currentTranscript;
+        setTranscript(currentTranscript);
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        if (event.error !== 'no-speech') {
+          setError(`Microphone error: ${event.error}. Please ensure microphone permissions are granted.`);
+        }
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+        if (transcriptRef.current.trim()) {
+          handleParseCommand(transcriptRef.current.trim());
+        }
+      };
+    }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      setError("Voice recognition is not supported in your browser. Try using Chrome.");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
+    }
+  };
+
+  const handleParseCommand = async (textToParse: string) => {
+    if (!textToParse) return;
     
     setIsProcessing(true);
     setError(null);
-    setResult(null);
 
     try {
       const prompt = `
@@ -39,7 +102,7 @@ Example: 'Good night routine' ->
   "confirmation_required": false
 }
 
-Parse this command: "${command}"
+Parse this command: "${textToParse}"
 `;
 
       const response = await ai.models.generateContent({
@@ -67,33 +130,47 @@ Parse this command: "${command}"
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Command Center</h1>
-        <p className="text-slate-500">Test the AI Brain's natural language parsing capabilities.</p>
+        <h1 className="text-2xl font-bold text-slate-900">Voice Command Center</h1>
+        <p className="text-slate-500">Speak naturally to trigger AI-powered automations.</p>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-        <label htmlFor="command-input" className="block text-sm font-medium text-slate-700 mb-2">
-          Natural Language Command
-        </label>
-        <div className="flex gap-3">
-          <input
-            id="command-input"
-            type="text"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleParseCommand()}
-            placeholder="e.g., 'Turn off wifi and set an alarm for 7 AM'"
-            className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
-            disabled={isProcessing}
-          />
-          <button
-            onClick={handleParseCommand}
-            disabled={isProcessing || !command.trim()}
-            className="px-6 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-          >
-            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            Parse
-          </button>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 flex flex-col items-center justify-center min-h-[300px] text-center">
+        <button
+          onClick={toggleListening}
+          disabled={isProcessing}
+          className={`
+            relative flex items-center justify-center w-24 h-24 rounded-full transition-all duration-300
+            ${isListening 
+              ? 'bg-rose-500 hover:bg-rose-600 shadow-[0_0_0_8px_rgba(244,63,94,0.2)] animate-pulse' 
+              : 'bg-emerald-500 hover:bg-emerald-600 shadow-lg hover:shadow-xl hover:-translate-y-1'}
+            ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}
+          `}
+        >
+          {isProcessing ? (
+            <Loader2 className="w-10 h-10 text-white animate-spin" />
+          ) : isListening ? (
+            <MicOff className="w-10 h-10 text-white" />
+          ) : (
+            <Mic className="w-10 h-10 text-white" />
+          )}
+        </button>
+
+        <div className="mt-8 space-y-2">
+          <h2 className="text-xl font-bold text-slate-900">
+            {isListening ? 'Listening...' : isProcessing ? 'Processing Command...' : 'Tap to Speak'}
+          </h2>
+          <div className="text-slate-500 max-w-md mx-auto min-h-[3rem] flex items-center justify-center">
+            {transcript ? (
+              <p className="text-lg text-slate-800 font-medium">"{transcript}"</p>
+            ) : isListening ? (
+              <p className="flex items-center gap-2">
+                <Activity className="w-4 h-4 animate-pulse text-rose-500" />
+                Speak your command now...
+              </p>
+            ) : (
+              <p>Say something like "Turn off wifi and set an alarm for 7 AM"</p>
+            )}
+          </div>
         </div>
       </div>
 
